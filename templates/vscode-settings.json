@@ -1,0 +1,21 @@
+{
+  "auto-refactor.enabled": true,
+  "auto-refactor.maxLines": 200,
+  "auto-refactor.watchMode": true,
+  "auto-refactor.showNotifications": true,
+  "auto-refactor.autoSave": true,
+  "auto-refactor.contextCompression": true,
+  "files.watcherExclude": {
+    "**/.refactor-backups/**": true,
+    "**/.context-snapshots/**": true
+  },
+  "files.exclude": {
+    "**/.refactor-backups": true,
+    "**/.context-snapshots": true
+  },
+  "editor.rulers": [200],
+  "editor.wordWrapColumn": 200,
+  "workbench.colorCustomizations": {
+    "editorRuler.foreground": "#ff6b6b50"
+  }
+}

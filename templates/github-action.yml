@@ -1,0 +1,93 @@
+name: Auto Refactor
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run weekly on Sundays at 2 AM UTC
+    - cron: '0 2 * * 0'
+
+jobs:
+  auto-refactor:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Install Auto-Refactor
+      run: npm install -g @vibecode/auto-refactor
+
+    - name: Run Auto-Refactor scan
+      run: auto-refactor scan --verbose
+
+    - name: Run Auto-Refactor (dry run)
+      run: auto-refactor run --dry --verbose
+
+    - name: Run Auto-Refactor
+      if: github.event_name == 'schedule'
+      run: auto-refactor run --verbose
+
+    - name: Compress context files
+      run: auto-refactor compress
+
+    - name: Check for changes
+      id: verify-changed-files
+      run: |
+        if [ -n "$(git status --porcelain)" ]; then
+          echo "changed=true" >> $GITHUB_OUTPUT
+        else
+          echo "changed=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Pull Request
+      if: steps.verify-changed-files.outputs.changed == 'true' && github.event_name == 'schedule'
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'refactor: auto-refactor code optimization'
+        title: '🤖 Auto-Refactor: Code Optimization'
+        body: |
+          ## Auto-Refactor Results
+          
+          This PR contains automatic code refactoring performed by @vibecode/auto-refactor.
+          
+          ### Changes Made:
+          - Split large files into smaller, more modular components
+          - Extracted reusable hooks and utilities  
+          - Optimized file structure for better maintainability
+          - Compressed context files for better token usage
+          
+          ### Review Checklist:
+          - [ ] Verify all functionality works as expected
+          - [ ] Check that imports are correctly updated
+          - [ ] Ensure no breaking changes were introduced
+          - [ ] Test the application thoroughly
+          
+          This PR was automatically created by the Auto-Refactor GitHub Action.
+        branch: auto-refactor/optimization
+        delete-branch: true
+
+    - name: Upload refactor stats
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: refactor-stats
+        path: |
+          .refactor-stats.json
+          .refactor-backups/
+        retention-days: 30

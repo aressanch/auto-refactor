@@ -1,69 +1,67 @@
-# @vibecode/auto-refactor
+# Auto-Refactor
 
 🚀 **Intelligent code refactoring and context compression for AI-assisted development**
 
-Automatically split large files into modular components, compress context for better token usage, and optimize your codebase for AI workflows like Cursor, Claude, and ChatGPT.
+A TypeScript CLI tool that automatically refactors large files into modular components and compresses context for better AI workflows. Perfect for projects using Cursor, Claude, ChatGPT, and other AI coding assistants.
 
 ## ✨ Features
 
-- **🔧 Automatic Refactoring**: Splits files >200 lines into focused, modular components
-- **🧠 Framework-Aware**: Auto-detects Next.js, React, Vue, Svelte, and more
-- **📦 Smart Component Extraction**: Separates types, hooks, utils, and sub-components
-- **💾 Context Compression**: Optimizes terminal logs and conversation history for AI
-- **👀 Watch Mode**: Real-time monitoring and auto-refactoring
-- **🔄 GitHub Actions**: Automated refactoring in CI/CD
-- **💽 Safe Backups**: Automatic backup creation before changes
-- **📊 Analytics**: Track refactoring impact and improvements
+- **🔧 Automatic Refactoring**: Intelligently splits large files into focused, modular components
+- **🧠 Framework-Aware**: Smart detection and handling of React, Next.js, Vue, and more
+- **📦 Component Extraction**: Separates types, hooks, utilities, and sub-components
+- **💾 Context Compression**: Optimizes files and logs for AI token limits
+- **👀 Watch Mode**: Real-time monitoring and automatic refactoring
+- **🔄 CI/CD Integration**: GitHub Actions workflow templates
+- **💽 Safe Operations**: Automatic backups and dry-run mode
+- **📊 Analytics**: Track refactoring impact and code improvements
 
-## 🚀 Quick Start
+## 🚀 Getting Started
 
 ### Installation
 
 ```bash
-npm install -g @vibecode/auto-refactor
-# or
-npx @vibecode/auto-refactor init
+# Clone the repository
+git clone https://github.com/aressanch/auto-refactor.git
+cd auto-refactor
+
+# Install dependencies
+npm install
+
+# Build the project
+npm run build
+
+# Link for global usage (optional)
+npm link
 ```
 
-### Initialize in Your Project
+### Usage
 
 ```bash
-cd your-project
+# Initialize in your project
 auto-refactor init
-```
 
-The tool will auto-detect your framework and create an optimized configuration.
-
-### Basic Usage
-
-```bash
 # Scan for files that need refactoring
 auto-refactor scan
 
-# Run refactoring
+# Run refactoring (dry run first)
+auto-refactor run --dry
+
+# Run actual refactoring
 auto-refactor run
-
-# Enable watch mode
-auto-refactor watch
-
-# Compress context files
-auto-refactor compress
 ```
 
-## 📖 Usage Guide
+## 📖 CLI Commands
 
-### CLI Commands
-
-#### `init` - Initialize Auto-Refactor
+### `init` - Initialize Configuration
 ```bash
 auto-refactor init [options]
 
 Options:
-  -f, --framework <framework>  Target framework (nextjs, react, vue, svelte)
+  -f, --framework <framework>  Target framework (react, nextjs, vue, svelte)
   -y, --yes                   Skip interactive prompts
 ```
 
-#### `scan` - Analyze Codebase
+### `scan` - Analyze Codebase
 ```bash
 auto-refactor scan [options]
 
@@ -72,7 +70,7 @@ Options:
   -v, --verbose              Verbose output
 ```
 
-#### `run` - Execute Refactoring
+### `run` - Execute Refactoring
 ```bash
 auto-refactor run [options]
 
@@ -83,16 +81,7 @@ Options:
   -v, --verbose              Verbose output
 ```
 
-#### `watch` - Monitor Files
-```bash
-auto-refactor watch [options]
-
-Options:
-  -c, --config <path>         Path to config file
-  -v, --verbose              Verbose output
-```
-
-#### `compress` - Context Compression
+### `compress` - Context Compression
 ```bash
 auto-refactor compress [file] [options]
 
@@ -100,30 +89,13 @@ Arguments:
   file                        Specific file to compress
 
 Options:
-  -w, --watch                 Watch context files continuously
   --max-tokens <number>       Maximum tokens per file (default: 4000)
   -o, --output <path>         Output file path
 ```
 
-### NPM Scripts Integration
-
-After initialization, these scripts are added to your `package.json`:
-
-```json
-{
-  "scripts": {
-    "refactor": "auto-refactor run",
-    "refactor:scan": "auto-refactor scan", 
-    "refactor:watch": "auto-refactor watch",
-    "compress:context": "auto-refactor compress",
-    "compress:watch": "auto-refactor compress --watch"
-  }
-}
-```
-
 ## ⚙️ Configuration
 
-Configuration is stored in `.auto-refactor.json`:
+The tool creates a `.auto-refactor.json` config file:
 
 ```json
 {
@@ -131,12 +103,6 @@ Configuration is stored in `.auto-refactor.json`:
   "targetDirectories": ["src", "components", "lib", "utils"],
   "fileExtensions": [".tsx", ".ts", ".jsx", ".js"],
   "excludePatterns": ["node_modules", ".next", "*.test.*"],
-  "watchMode": true,
-  "contextCompression": {
-    "enabled": true,
-    "maxContextLines": 200,
-    "compressionRatio": 0.4
-  },
   "refactoring": {
     "createTypes": true,
     "extractHooks": true,
@@ -144,12 +110,6 @@ Configuration is stored in `.auto-refactor.json`:
     "splitComponents": true
   }
 }
-```
-
-### Interactive Configuration
-
-```bash
-auto-refactor config --edit
 ```
 
 ## 🏗️ How It Works
@@ -179,7 +139,7 @@ MyLargeComponent/
 
 ### Context Compression
 
-Intelligently compresses terminal logs and conversation history:
+Intelligently compresses files and logs for AI workflows:
 
 - **Preserves**: Errors, warnings, important commands, recent content
 - **Compresses**: Verbose output, redundant information, old logs
@@ -189,15 +149,15 @@ Intelligently compresses terminal logs and conversation history:
 
 | Framework | Status | Features |
 |-----------|--------|----------|
-| **Next.js** | ✅ Full | App Router, Pages Router, API routes |
 | **React** | ✅ Full | Components, hooks, utils extraction |
-| **Vue** | ✅ Full | Composition API, components, composables |
-| **Svelte** | ✅ Full | Components, stores, utilities |
+| **Next.js** | ✅ Full | App Router, Pages Router, API routes |
 | **TypeScript** | ✅ Full | Type extraction, interface organization |
+| **Vue** | 🚧 Planned | Components, composables |
+| **Svelte** | 🚧 Planned | Components, stores, utilities |
 
-## 🚀 GitHub Actions Integration
+## 🚀 CI/CD Integration
 
-Add automated refactoring to your CI/CD:
+Add automated refactoring to your workflow:
 
 ```yaml
 # .github/workflows/auto-refactor.yml
@@ -214,76 +174,37 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
       - run: npm ci
-      - run: npx auto-refactor run
+      - run: npm run build
+      - run: npm run refactor -- --dry
+      - run: npm run refactor
       - uses: peter-evans/create-pull-request@v5
         with:
           title: '🤖 Auto-Refactor: Code Optimization'
 ```
 
-## 💡 Use Cases
+## 💡 Benefits
 
-### For AI-Assisted Development
-- **Cursor**: Keep context manageable for better AI suggestions
-- **Claude/ChatGPT**: Optimize token usage in conversations  
-- **GitHub Copilot**: Smaller files = better code completion
-
-### For Code Quality
-- **Maintainability**: Smaller, focused components
-- **Reusability**: Extracted hooks and utilities
-- **Performance**: Better tree-shaking and bundle optimization
-- **Testing**: Easier to test smaller components
-
-### For Team Collaboration
-- **Code Reviews**: Smaller files are easier to review
-- **Onboarding**: Better code organization for new developers
-- **Debugging**: Focused components simplify troubleshooting
-
-## 📊 Benefits
-
-| Metric | Before | After | Improvement |
-|--------|--------|--------|-------------|
-| **Average File Size** | 350 lines | 120 lines | 65% reduction |
-| **AI Context Usage** | 8000 tokens | 3200 tokens | 60% reduction |
-| **Bundle Analysis** | Harder to optimize | Better tree-shaking | 25% smaller bundles |
-| **Code Review Time** | 45 minutes | 20 minutes | 55% faster |
+- **Better AI Assistance**: Smaller files fit better in AI context windows
+- **Improved Maintainability**: Modular code is easier to understand and modify
+- **Enhanced Reusability**: Extracted hooks and utilities can be shared
+- **Faster Development**: Better code organization speeds up development
+- **Team Collaboration**: Smaller files are easier to review and merge
 
 ## 🛡️ Safety Features
 
 - **Automatic Backups**: All files backed up before changes
 - **Dry Run Mode**: Preview changes before applying
 - **Git Integration**: Respects .gitignore patterns
-- **Rollback Support**: Easy restoration if needed
 - **Non-destructive**: Preserves original functionality
-
-## 📦 API Usage
-
-Use programmatically in your tools:
-
-```typescript
-import { AutoRefactor, ContextCompressor } from '@vibecode/auto-refactor';
-
-// Initialize refactoring
-const refactor = new AutoRefactor(config);
-
-// Scan for files needing refactoring
-const needsRefactoring = await refactor.scan();
-
-// Run refactoring
-const results = await refactor.run();
-
-// Compress context
-const compressor = new ContextCompressor();
-await compressor.compressFile('large-context.log');
-```
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ### Development Setup
 
 ```bash
-git clone https://github.com/vibecode/auto-refactor
+git clone https://github.com/aressanch/auto-refactor.git
 cd auto-refactor
 npm install
 npm run dev
@@ -291,15 +212,13 @@ npm run dev
 
 ## 📄 License
 
-MIT © [VibeCode Team](https://vibecode.fun)
+MIT © [Ares Sanchez](https://github.com/aressanch)
 
 ## 🔗 Links
 
-- **Website**: [vibecode.fun](https://vibecode.fun)
-- **Documentation**: [docs.vibecode.fun/auto-refactor](https://docs.vibecode.fun/auto-refactor)
-- **Issues**: [GitHub Issues](https://github.com/vibecode/auto-refactor/issues)
-- **Discord**: [VibeCode Community](https://discord.gg/vibecode)
+- **Repository**: [https://github.com/aressanch/auto-refactor](https://github.com/aressanch/auto-refactor)
+- **Issues**: [GitHub Issues](https://github.com/aressanch/auto-refactor/issues)
 
 ---
 
-**Made with ❤️ by the VibeCode team for the AI-assisted development community.**
+**Built for the AI-assisted development community** 🤖❤️

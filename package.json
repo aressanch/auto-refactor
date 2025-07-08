@@ -1,5 +1,5 @@
 {
-  "name": "@vibecode/auto-refactor",
+  "name": "auto-refactor",
   "version": "1.0.0",
   "description": "Intelligent code refactoring and context compression for AI-assisted development",
   "main": "dist/index.js",

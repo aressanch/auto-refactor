@@ -42,12 +42,34 @@ export interface RunOptions {
   dryRun?: boolean;
   createBackups?: boolean;
   verbose?: boolean;
+  specificFile?: string;
 }
 
 export interface CompressOptions {
   watch?: boolean;
   maxTokens?: number;
   output?: string;
+}
+
+interface FileStructure {
+  totalLines: number;
+  imports: { count: number; lines: number };
+  interfaces: { count: number; lines: number };
+  types: { count: number; lines: number };
+  constants: { count: number; lines: number };
+  functions: { count: number; lines: number };
+  components: { count: number; lines: number };
+  classes: { count: number; lines: number };
+  comments: { lines: number };
+  emptyLines: number;
+  largestFunction: { name: string; lines: number };
+  largestComponent: { name: string; lines: number };
+}
+
+interface SplitStrategy {
+  approach: string;
+  suggestions: string[];
+  files: string[];
 }
 
 export class AutoRefactor {
@@ -209,7 +231,49 @@ export class AutoRefactor {
   async run(options: RunOptions = {}): Promise<RefactorResult[]> {
     logger.header('Running Auto-Refactor');
 
-    const filesToRefactor = await this.scan();
+    let filesToRefactor: FileToRefactor[];
+
+    if (options.specificFile) {
+      // Handle specific file refactoring
+      const absolutePath = path.resolve(this.projectRoot, options.specificFile);
+
+      if (!fs.existsSync(absolutePath)) {
+        throw new Error(`File not found: ${options.specificFile}`);
+      }
+
+      const stats = await fs.stat(absolutePath);
+      if (!stats.isFile()) {
+        throw new Error(`Path is not a file: ${options.specificFile}`);
+      }
+
+      const extension = path.extname(absolutePath);
+      if (!this.config.fileExtensions.includes(extension)) {
+        throw new Error(
+          `File extension ${extension} is not supported. Supported extensions: ${this.config.fileExtensions.join(', ')}`
+        );
+      }
+
+      const lineCount = await getFileLineCount(absolutePath);
+
+      filesToRefactor = [
+        {
+          path: absolutePath,
+          lines: lineCount,
+          framework:
+            extension.includes('tsx') || extension.includes('jsx')
+              ? 'react'
+              : 'typescript',
+        },
+      ];
+
+      logger.info(
+        `Targeting specific file: ${options.specificFile} (${lineCount} lines)`
+      );
+    } else {
+      // Normal scan for all files
+      filesToRefactor = await this.scan();
+    }
+
     if (filesToRefactor.length === 0) {
       logger.info('No files need refactoring');
       return [];
@@ -286,20 +350,26 @@ export class AutoRefactor {
       const line = lines[i];
 
       // Look for fragment declarations - constants that contain template literals
-      if ((line.trim().startsWith('const ') || line.trim().startsWith('export const ')) &&
-          (line.includes('Fragment') || line.includes('fragment')) &&
-          line.includes('=') &&
-          line.includes('`')) {
+      if (
+        (line.trim().startsWith('const ') ||
+          line.trim().startsWith('export const ')) &&
+        (line.includes('Fragment') || line.includes('fragment')) &&
+        line.includes('=') &&
+        line.includes('`')
+      ) {
         inFragment = true;
         currentFragment = line;
         backquoteCount = (line.match(/`/g) || []).length;
-      } else if ((line.trim().startsWith('const ') || line.trim().startsWith('export const ')) &&
-                 line.includes('=') &&
-                 line.includes('`') &&
-                 !line.includes('GraphQlQuery') &&
-                 !line.includes('query') &&
-                 !line.includes('mutation') &&
-                 !line.includes('subscription')) {
+      } else if (
+        (line.trim().startsWith('const ') ||
+          line.trim().startsWith('export const ')) &&
+        line.includes('=') &&
+        line.includes('`') &&
+        !line.includes('GraphQlQuery') &&
+        !line.includes('query') &&
+        !line.includes('mutation') &&
+        !line.includes('subscription')
+      ) {
         // This is likely a fragment-like constant
         inFragment = true;
         currentFragment = line;
@@ -384,7 +454,10 @@ export class AutoRefactor {
     return queries;
   }
 
-  private extractRemainingQueries(content: string, excludePatterns: RegExp[]): string[] {
+  private extractRemainingQueries(
+    content: string,
+    excludePatterns: RegExp[]
+  ): string[] {
     const queries: string[] = [];
     const lines = content.split('\n');
     let currentQuery = '';
@@ -411,8 +484,10 @@ export class AutoRefactor {
       }
 
       // Look for method declarations that DON'T match any of the exclude patterns
-      if (line.trim().match(/^\w+:\s*\(.*\)\s*=>\s*\{/) &&
-          !excludePatterns.some(pattern => pattern.test(line))) {
+      if (
+        line.trim().match(/^\w+:\s*\(.*\)\s*=>\s*\{/) &&
+        !excludePatterns.some((pattern) => pattern.test(line))
+      ) {
         inQuery = true;
         currentQuery = line;
         braceCount = 1; // We start with 1 because of the opening brace in the arrow function
@@ -605,22 +680,22 @@ export class AutoRefactor {
       .join('\n');
 
     const exportParts = [];
-    if (newFiles.some(file => file.includes('fragments'))) {
+    if (newFiles.some((file) => file.includes('fragments'))) {
       exportParts.push('...fragments');
     }
-    if (newFiles.some(file => file.includes('bot-queries'))) {
+    if (newFiles.some((file) => file.includes('bot-queries'))) {
       exportParts.push('...botQueries');
     }
-    if (newFiles.some(file => file.includes('deal-queries'))) {
+    if (newFiles.some((file) => file.includes('deal-queries'))) {
       exportParts.push('...dealQueries');
     }
-    if (newFiles.some(file => file.includes('user-queries'))) {
+    if (newFiles.some((file) => file.includes('user-queries'))) {
       exportParts.push('...userQueries');
     }
-    if (newFiles.some(file => file.includes('exchange-queries'))) {
+    if (newFiles.some((file) => file.includes('exchange-queries'))) {
       exportParts.push('...exchangeQueries');
     }
-    if (newFiles.some(file => file.includes('other-queries'))) {
+    if (newFiles.some((file) => file.includes('other-queries'))) {
       exportParts.push('...otherQueries');
     }
 
@@ -847,10 +922,12 @@ export class AutoRefactor {
         importLines.push(line);
 
         // Count braces to handle multi-line imports
-        braceCount = (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+        braceCount =
+          (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
       } else if (inImport) {
         importLines.push(line);
-        braceCount += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+        braceCount +=
+          (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
 
         // If we've closed all braces and hit a semicolon, we're done with this import
         if (braceCount <= 0 && line.includes(';')) {
@@ -875,11 +952,17 @@ export class AutoRefactor {
       fragmentNames = this.extractFragmentNames(fragmentsContent);
 
       // Only include types used in fragments
-      const usedTypesInFragments = this.filterUsedTypes(allImportedTypes, fragmentsContent.join('\n'));
-      const fragmentTypeImports = this.createTypeImports(usedTypesInFragments, typeImportSource);
+      const usedTypesInFragments = this.filterUsedTypes(
+        allImportedTypes,
+        fragmentsContent.join('\n')
+      );
+      const fragmentTypeImports = this.createTypeImports(
+        usedTypesInFragments,
+        typeImportSource
+      );
 
       // Clean up fragments to avoid duplicate exports
-      const cleanedFragments = fragmentsContent.map(fragment => {
+      const cleanedFragments = fragmentsContent.map((fragment) => {
         // Remove export keyword from individual fragments since we'll export them all at the end
         return fragment.replace(/^export\s+/, '');
       });
@@ -899,12 +982,16 @@ export class AutoRefactor {
       const botFile = path.join(dir, `${baseName}-bot-queries.ts`);
       const botQueriesContent = this.joinQueries(botQueries);
       const usedFragments = this.extractUsedFragments(botQueriesContent);
-      const usedTypes = this.filterUsedTypes(allImportedTypes, botQueriesContent);
+      const usedTypes = this.filterUsedTypes(
+        allImportedTypes,
+        botQueriesContent
+      );
 
       const typeImports = this.createTypeImports(usedTypes, typeImportSource);
-      const fragmentImports = usedFragments.length > 0
-        ? `import {\n  ${usedFragments.join(',\n  ')}\n} from './${baseName}-fragments';\n`
-        : '';
+      const fragmentImports =
+        usedFragments.length > 0
+          ? `import {\n  ${usedFragments.join(',\n  ')}\n} from './${baseName}-fragments';\n`
+          : '';
 
       const botFileContent = `${typeImports}${fragmentImports ? '\n' + fragmentImports : ''}\n\nexport const botQueries = {\n${botQueriesContent}\n};\n`;
       await fs.writeFile(botFile, botFileContent);
@@ -918,12 +1005,16 @@ export class AutoRefactor {
       const dealFile = path.join(dir, `${baseName}-deal-queries.ts`);
       const dealQueriesContent = this.joinQueries(dealQueries);
       const usedFragments = this.extractUsedFragments(dealQueriesContent);
-      const usedTypes = this.filterUsedTypes(allImportedTypes, dealQueriesContent);
+      const usedTypes = this.filterUsedTypes(
+        allImportedTypes,
+        dealQueriesContent
+      );
 
       const typeImports = this.createTypeImports(usedTypes, typeImportSource);
-      const fragmentImports = usedFragments.length > 0
-        ? `import {\n  ${usedFragments.join(',\n  ')}\n} from './${baseName}-fragments';\n`
-        : '';
+      const fragmentImports =
+        usedFragments.length > 0
+          ? `import {\n  ${usedFragments.join(',\n  ')}\n} from './${baseName}-fragments';\n`
+          : '';
 
       const dealFileContent = `${typeImports}${fragmentImports ? '\n' + fragmentImports : ''}\n\nexport const dealQueries = {\n${dealQueriesContent}\n};\n`;
       await fs.writeFile(dealFile, dealFileContent);
@@ -940,12 +1031,16 @@ export class AutoRefactor {
       const userFile = path.join(dir, `${baseName}-user-queries.ts`);
       const userQueriesContent = this.joinQueries(userQueries);
       const usedFragments = this.extractUsedFragments(userQueriesContent);
-      const usedTypes = this.filterUsedTypes(allImportedTypes, userQueriesContent);
+      const usedTypes = this.filterUsedTypes(
+        allImportedTypes,
+        userQueriesContent
+      );
 
       const typeImports = this.createTypeImports(usedTypes, typeImportSource);
-      const fragmentImports = usedFragments.length > 0
-        ? `import {\n  ${usedFragments.join(',\n  ')}\n} from './${baseName}-fragments';\n`
-        : '';
+      const fragmentImports =
+        usedFragments.length > 0
+          ? `import {\n  ${usedFragments.join(',\n  ')}\n} from './${baseName}-fragments';\n`
+          : '';
 
       const userFileContent = `${typeImports}${fragmentImports ? '\n' + fragmentImports : ''}\n\nexport const userQueries = {\n${userQueriesContent}\n};\n`;
       await fs.writeFile(userFile, userFileContent);
@@ -959,12 +1054,16 @@ export class AutoRefactor {
       const exchangeFile = path.join(dir, `${baseName}-exchange-queries.ts`);
       const exchangeQueriesContent = this.joinQueries(exchangeQueries);
       const usedFragments = this.extractUsedFragments(exchangeQueriesContent);
-      const usedTypes = this.filterUsedTypes(allImportedTypes, exchangeQueriesContent);
+      const usedTypes = this.filterUsedTypes(
+        allImportedTypes,
+        exchangeQueriesContent
+      );
 
       const typeImports = this.createTypeImports(usedTypes, typeImportSource);
-      const fragmentImports = usedFragments.length > 0
-        ? `import {\n  ${usedFragments.join(',\n  ')}\n} from './${baseName}-fragments';\n`
-        : '';
+      const fragmentImports =
+        usedFragments.length > 0
+          ? `import {\n  ${usedFragments.join(',\n  ')}\n} from './${baseName}-fragments';\n`
+          : '';
 
       const exchangeFileContent = `${typeImports}${fragmentImports ? '\n' + fragmentImports : ''}\n\nexport const exchangeQueries = {\n${exchangeQueriesContent}\n};\n`;
       await fs.writeFile(exchangeFile, exchangeFileContent);
@@ -977,18 +1076,22 @@ export class AutoRefactor {
       /bot|dca|grid|combo|hedge/i,
       /deal/i,
       /user|notification|subscription/i,
-      /exchange/i
+      /exchange/i,
     ]);
     if (remainingQueries.length > 0) {
       const remainingFile = path.join(dir, `${baseName}-other-queries.ts`);
       const remainingQueriesContent = this.joinQueries(remainingQueries);
       const usedFragments = this.extractUsedFragments(remainingQueriesContent);
-      const usedTypes = this.filterUsedTypes(allImportedTypes, remainingQueriesContent);
+      const usedTypes = this.filterUsedTypes(
+        allImportedTypes,
+        remainingQueriesContent
+      );
 
       const typeImports = this.createTypeImports(usedTypes, typeImportSource);
-      const fragmentImports = usedFragments.length > 0
-        ? `import {\n  ${usedFragments.join(',\n  ')}\n} from './${baseName}-fragments';\n`
-        : '';
+      const fragmentImports =
+        usedFragments.length > 0
+          ? `import {\n  ${usedFragments.join(',\n  ')}\n} from './${baseName}-fragments';\n`
+          : '';
 
       const remainingFileContent = `${typeImports}${fragmentImports ? '\n' + fragmentImports : ''}\n\nexport const otherQueries = {\n${remainingQueriesContent}\n};\n`;
       await fs.writeFile(remainingFile, remainingFileContent);
@@ -1099,20 +1202,26 @@ export class AutoRefactor {
   ): Promise<{ newFiles: string[] }> {
     const dir = path.dirname(filePath);
     const baseName = path.basename(filePath, path.extname(filePath));
+    const extension = path.extname(filePath);
     const newFiles: string[] = [];
 
-    // Simple splitting by function/class boundaries
+    // For React/TypeScript components, use intelligent splitting
+    if (extension === '.tsx' || extension === '.jsx') {
+      return this.refactorReactComponent(filePath, content);
+    }
+
+    // Simple splitting by function/class boundaries for other files
     const chunks = this.splitContentIntoChunks(content, this.config.maxLines);
 
     for (let i = 0; i < chunks.length; i++) {
-      const chunkFile = path.join(dir, `${baseName}-part${i + 1}.ts`);
+      const chunkFile = path.join(dir, `${baseName}-part${i + 1}${extension}`);
       await fs.writeFile(chunkFile, chunks[i]);
       newFiles.push(chunkFile);
       logger.debug(`Created chunk file: ${chunkFile}`);
     }
 
     // Create index file
-    const indexFile = path.join(dir, `${baseName}-index.ts`);
+    const indexFile = path.join(dir, `${baseName}-index${extension}`);
     const indexContent = this.createGenericIndexFile(baseName, newFiles);
     await fs.writeFile(indexFile, indexContent);
     newFiles.push(indexFile);
@@ -1120,15 +1229,112 @@ export class AutoRefactor {
     return { newFiles };
   }
 
+  private async refactorReactComponent(
+    filePath: string,
+    content: string
+  ): Promise<{ newFiles: string[] }> {
+    const dir = path.dirname(filePath);
+    const baseName = path.basename(filePath, path.extname(filePath));
+    const extension = path.extname(filePath);
+    const newFiles: string[] = [];
+
+    try {
+      // Extract different logical sections
+      const sections = this.extractReactComponentSections(content);
+
+      // Extract imports
+      const imports = this.extractImportsSection(content);
+
+      // Create separate files for each section
+      if (sections.types.length > 0) {
+        const typesFile = path.join(dir, `${baseName}-types.ts`);
+        const typesContent = this.createTypesFile(
+          imports.filter(
+            (imp) =>
+              imp.includes('type') ||
+              imp.includes('interface') ||
+              imp.includes('React')
+          ),
+          sections.types
+        );
+        await fs.writeFile(typesFile, typesContent);
+        newFiles.push(typesFile);
+      }
+
+      if (sections.utilities.length > 0) {
+        const utilsFile = path.join(dir, `${baseName}-utils.ts`);
+        const utilsContent = this.createUtilsFile(
+          imports.filter(
+            (imp) =>
+              !imp.includes('React') &&
+              !imp.includes('./') &&
+              !imp.includes('@/')
+          ),
+          sections.utilities
+        );
+        await fs.writeFile(utilsFile, utilsContent);
+        newFiles.push(utilsFile);
+      }
+
+      if (sections.subComponents.length > 0) {
+        const componentsFile = path.join(
+          dir,
+          `${baseName}-components${extension}`
+        );
+        const componentsContent = this.createComponentsFile(
+          imports,
+          sections.subComponents
+        );
+        await fs.writeFile(componentsFile, componentsContent);
+        newFiles.push(componentsFile);
+      }
+
+      // Main component file
+      const mainFile = path.join(dir, `${baseName}-main${extension}`);
+      const mainContent = this.createMainComponentFile(
+        imports,
+        sections.mainComponent,
+        newFiles.map((f) => path.relative(dir, f))
+      );
+      await fs.writeFile(mainFile, mainContent);
+      newFiles.push(mainFile);
+
+      // Create index file that re-exports everything
+      const indexFile = path.join(dir, `${baseName}-index${extension}`);
+      const indexContent = this.createReactIndexFile(baseName, newFiles);
+      await fs.writeFile(indexFile, indexContent);
+      newFiles.push(indexFile);
+
+      return { newFiles };
+    } catch (error) {
+      logger.error(`Failed to refactor React component: ${error}`);
+      // Fallback to simple splitting
+      const chunks = this.splitContentIntoChunks(content, this.config.maxLines);
+
+      for (let i = 0; i < chunks.length; i++) {
+        const chunkFile = path.join(
+          dir,
+          `${baseName}-part${i + 1}${extension}`
+        );
+        await fs.writeFile(chunkFile, chunks[i]);
+        newFiles.push(chunkFile);
+      }
+
+      return { newFiles };
+    }
+  }
+
   private extractUsedFragments(content: string): string[] {
     // Look for both ${fragmentName} and plain fragmentName usage
     const fragmentMatches1 = content.match(/\$\{([a-zA-Z_][a-zA-Z0-9_]*)\}/g);
-    const fragmentMatches2 = content.match(/\b([a-zA-Z_][a-zA-Z0-9_]*Fragment)\b/g);
+    const fragmentMatches2 = content.match(
+      /\b([a-zA-Z_][a-zA-Z0-9_]*Fragment)\b/g
+    );
 
     const allMatches = [];
 
     if (fragmentMatches1) {
-      allMatches.push(...fragmentMatches1.map(match => match.slice(2, -1))); // Remove ${ and }
+      allMatches.push(...fragmentMatches1.map((match) => match.slice(2, -1))); // Remove ${ and }
     }
 
     if (fragmentMatches2) {
@@ -1143,7 +1349,7 @@ export class AutoRefactor {
     const typeMatches = content.match(/:\s*([A-Z][a-zA-Z0-9_]*)/g);
     if (!typeMatches) return [];
 
-    const types = typeMatches.map(match => match.slice(2)); // Remove ': '
+    const types = typeMatches.map((match) => match.slice(2)); // Remove ': '
     return [...new Set(types)]; // Remove duplicates
   }
 
@@ -1155,8 +1361,13 @@ export class AutoRefactor {
     const importMatches = importContent.match(/import\s+type\s*\{([^}]+)\}/g);
     if (importMatches) {
       for (const match of importMatches) {
-        const typesString = match.replace(/import\s+type\s*\{/, '').replace(/\}/, '');
-        const types = typesString.split(',').map(t => t.trim()).filter(t => t);
+        const typesString = match
+          .replace(/import\s+type\s*\{/, '')
+          .replace(/\}/, '');
+        const types = typesString
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t);
         typeNames.push(...types);
       }
     }
@@ -1166,7 +1377,10 @@ export class AutoRefactor {
     if (regularImports) {
       for (const match of regularImports) {
         const typesString = match.replace(/import\s*\{/, '').replace(/\}/, '');
-        const types = typesString.split(',').map(t => t.trim()).filter(t => t);
+        const types = typesString
+          .split(',')
+          .map((t) => t.trim())
+          .filter((t) => t);
         typeNames.push(...types);
       }
     }
@@ -1174,7 +1388,10 @@ export class AutoRefactor {
     return [...new Set(typeNames)]; // Remove duplicates
   }
 
-  private filterUsedTypes(allTypes: string[], contentToAnalyze: string): string[] {
+  private filterUsedTypes(
+    allTypes: string[],
+    contentToAnalyze: string
+  ): string[] {
     const usedTypes: string[] = [];
 
     for (const type of allTypes) {
@@ -1192,21 +1409,24 @@ export class AutoRefactor {
     if (usedTypes.length === 0) return '';
 
     // Adjust path for API directory to types directory
-    const actualSourcePath = sourcePath === '../types' ? '../../types' : sourcePath;
+    const actualSourcePath =
+      sourcePath === '../types' ? '../../types' : sourcePath;
 
     // Group imports by their likely source
     const typeImports: string[] = [];
 
     if (usedTypes.length > 0) {
       const sortedTypes = usedTypes.sort();
-      typeImports.push(`import type {\n  ${sortedTypes.join(',\n  ')}\n} from '${actualSourcePath}';`);
+      typeImports.push(
+        `import type {\n  ${sortedTypes.join(',\n  ')}\n} from '${actualSourcePath}';`
+      );
     }
 
     return typeImports.join('\n');
   }
 
   private cleanupQueriesArray(queries: string[]): string[] {
-    return queries.map(query => {
+    return queries.map((query) => {
       // Remove trailing commas from individual queries
       let cleanQuery = query.trim();
       if (cleanQuery.endsWith(',')) {
@@ -1245,37 +1465,58 @@ export class AutoRefactor {
       return this.analyzeTypesFile(filePath, content, lines);
     }
 
-    // Generic analysis
-    const imports = lines.filter((line) => line.trim().startsWith('import'));
-    const exports = lines.filter((line) => line.trim().startsWith('export'));
-    const functions = lines.filter(
-      (line) =>
-        line.includes('function ') ||
-        (line.includes('const ') && line.includes('=>')) ||
-        line.includes('class ')
+    // Enhanced detailed analysis
+    const fileStructure = this.analyzeFileStructure(content, lines);
+
+    analysis.push(
+      `   Imports: ${fileStructure.imports.count} (${fileStructure.imports.lines} lines)`
     );
-
-    analysis.push(`   Imports: ${imports.length}`);
-    analysis.push(`   Exports: ${exports.length}`);
-    analysis.push(`   Functions/Constants: ${functions.length}`);
-
-    // Suggest splitting by functionality
-    const functionsPerFile = Math.ceil(functions.length / 3);
-    const estimatedFiles = Math.min(
-      Math.ceil(functions.length / functionsPerFile),
-      5
+    analysis.push(
+      `   Interfaces: ${fileStructure.interfaces.count} (${fileStructure.interfaces.lines} lines)`
     );
+    analysis.push(
+      `   Types: ${fileStructure.types.count} (${fileStructure.types.lines} lines)`
+    );
+    analysis.push(
+      `   Constants: ${fileStructure.constants.count} (${fileStructure.constants.lines} lines)`
+    );
+    analysis.push(
+      `   Functions: ${fileStructure.functions.count} (${fileStructure.functions.lines} lines)`
+    );
+    analysis.push(
+      `   Components: ${fileStructure.components.count} (${fileStructure.components.lines} lines)`
+    );
+    analysis.push(
+      `   Classes: ${fileStructure.classes.count} (${fileStructure.classes.lines} lines)`
+    );
+    analysis.push(`   Comments: ${fileStructure.comments.lines} lines`);
+    analysis.push(`   Empty lines: ${fileStructure.emptyLines} lines`);
 
-    for (let i = 0; i < estimatedFiles; i++) {
-      const baseName = path.basename(filePath, path.extname(filePath));
-      const dir = path.dirname(filePath);
-      suggestedFiles.push(`${dir}/${baseName}-part${i + 1}.ts`);
+    if (fileStructure.largestFunction.name) {
+      analysis.push(
+        `   Largest function: ${fileStructure.largestFunction.name} (${fileStructure.largestFunction.lines} lines)`
+      );
     }
 
-    analysis.push(`💡 Suggested approach: Split into ${estimatedFiles} files`);
-    analysis.push(
-      `   Each file would have ~${Math.ceil(lines.length / estimatedFiles)} lines`
-    );
+    if (fileStructure.largestComponent.name) {
+      analysis.push(
+        `   Largest component: ${fileStructure.largestComponent.name} (${fileStructure.largestComponent.lines} lines)`
+      );
+    }
+
+    // Suggest splitting strategy based on structure
+    const splitStrategy = this.suggestSplitStrategy(fileStructure, filePath);
+    analysis.push(`💡 Suggested approach: ${splitStrategy.approach}`);
+
+    splitStrategy.suggestions.forEach((suggestion: string) => {
+      analysis.push(`   ${suggestion}`);
+    });
+
+    // Generate suggested files
+    splitStrategy.files.forEach((fileName: string) => {
+      const dir = path.dirname(filePath);
+      suggestedFiles.push(`${dir}/${fileName}`);
+    });
 
     return {
       suggestedFiles,
@@ -1471,14 +1712,1300 @@ export class AutoRefactor {
     };
   }
 
+  async splitFile(
+    filePath: string,
+    options: { dryRun?: boolean } = {}
+  ): Promise<RefactorResult> {
+    logger.header(`Smart Splitting: ${path.basename(filePath)}`);
+
+    const absolutePath = path.resolve(this.projectRoot, filePath);
+
+    if (!fs.existsSync(absolutePath)) {
+      throw new Error(`File not found: ${filePath}`);
+    }
+
+    const content = await fs.readFile(absolutePath, 'utf8');
+    const lines = content.split('\n');
+    const fileStructure = this.analyzeFileStructure(content, lines);
+
+    if (options.dryRun) {
+      const strategy = this.suggestSplitStrategy(fileStructure, filePath);
+      const analysis = [
+        `📊 Smart Split Analysis for ${path.basename(filePath)}`,
+        `   Total lines: ${lines.length}`,
+        `   Suggested approach: ${strategy.approach}`,
+        ...strategy.suggestions,
+        `   📁 Suggested files: ${strategy.files.length}`,
+        ...strategy.files.map((f) => `     • ${f}`),
+      ];
+
+      return {
+        originalFile: filePath,
+        newFiles: strategy.files.map((f) =>
+          path.join(path.dirname(absolutePath), f)
+        ),
+        linesReduced: lines.length * 0.7,
+        success: true,
+        analysis,
+      };
+    }
+
+    // Perform actual split
+    const strategy = this.suggestSplitStrategy(fileStructure, filePath);
+    const createdFiles = await this.performIntelligentSplit(
+      absolutePath,
+      content,
+      fileStructure,
+      strategy
+    );
+
+    return {
+      originalFile: filePath,
+      newFiles: createdFiles,
+      linesReduced: lines.length * 0.7,
+      success: true,
+    };
+  }
+
   private extractFragmentNames(fragmentsContent: string[]): string[] {
     const names: string[] = [];
+
     for (const fragment of fragmentsContent) {
-      const match = fragment.match(/(?:export\s+)?const\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*=/m);
+      const match = fragment.match(/const\s+(\w+Fragment)/);
       if (match) {
         names.push(match[1]);
       }
     }
+
     return names;
+  }
+
+  private extractImportsSection(content: string): string[] {
+    const lines = content.split('\n');
+    const imports: string[] = [];
+    let inImport = false;
+    let braceCount = 0;
+
+    for (const line of lines) {
+      if (line.trim().startsWith('import')) {
+        inImport = true;
+        imports.push(line);
+        braceCount =
+          (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+      } else if (inImport) {
+        imports.push(line);
+        braceCount +=
+          (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+
+        if (braceCount <= 0 && line.includes(';')) {
+          inImport = false;
+          braceCount = 0;
+        }
+      } else if (imports.length > 0 && !line.trim().startsWith('import')) {
+        break;
+      }
+    }
+
+    return imports;
+  }
+
+  private extractReactComponentSections(content: string): {
+    types: string[];
+    utilities: string[];
+    subComponents: string[];
+    mainComponent: string;
+  } {
+    const lines = content.split('\n');
+    const sections = {
+      types: [] as string[],
+      utilities: [] as string[],
+      subComponents: [] as string[],
+      mainComponent: '',
+    };
+
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+
+      // Skip imports
+      if (line.trim().startsWith('import')) {
+        i++;
+        continue;
+      }
+
+      // Extract interfaces and types
+      if (line.includes('interface ') || line.includes('type ')) {
+        const typedef = this.extractCompleteTypeDefinition(lines, i);
+        sections.types.push(typedef);
+        i += typedef.split('\n').length;
+        continue;
+      }
+
+      // Extract utility functions (non-component functions)
+      if (
+        line.includes('function ') ||
+        (line.includes('const ') &&
+          line.includes(' = ') &&
+          !line.includes('React.') &&
+          !line.includes('<') &&
+          !line.includes('JSX'))
+      ) {
+        const func = this.extractCompleteFunction(lines, i);
+        if (
+          !func.includes('return (') &&
+          !func.includes('jsx') &&
+          !func.includes('tsx')
+        ) {
+          sections.utilities.push(func);
+        }
+        i += func.split('\n').length;
+        continue;
+      }
+
+      // Extract sub-components (functions that return JSX)
+      if (
+        (line.includes('function ') ||
+          (line.includes('const ') && line.includes(' = '))) &&
+        (line.includes('React.') ||
+          line.includes(': React.') ||
+          content.substring(content.indexOf(line)).includes('return ('))
+      ) {
+        const component = this.extractCompleteFunction(lines, i);
+        if (
+          component.includes('return (') ||
+          component.includes('jsx') ||
+          component.includes('tsx')
+        ) {
+          // Check if this is the main export
+          const isMainExport =
+            line.includes('export default') ||
+            (i + component.split('\n').length < lines.length &&
+              lines
+                .slice(i + component.split('\n').length)
+                .some(
+                  (l) =>
+                    l.includes('export default') &&
+                    l.includes(
+                      line.match(/(?:function|const)\s+(\w+)/)?.[1] || ''
+                    )
+                ));
+
+          if (isMainExport) {
+            sections.mainComponent = component;
+          } else {
+            sections.subComponents.push(component);
+          }
+        }
+        i += component.split('\n').length;
+        continue;
+      }
+
+      i++;
+    }
+
+    return sections;
+  }
+
+  private extractCompleteTypeDefinition(
+    lines: string[],
+    startIndex: number
+  ): string {
+    const endIndex = this.findEndOfTypeDefinition(lines, startIndex);
+    return lines.slice(startIndex, endIndex + 1).join('\n');
+  }
+
+  private extractCompleteFunction(lines: string[], startIndex: number): string {
+    const endIndex = this.findEndOfFunction(lines, startIndex);
+    return lines.slice(startIndex, endIndex + 1).join('\n');
+  }
+
+  private findEndOfTypeDefinition(lines: string[], startIndex: number): number {
+    let braceCount = 0;
+    let i = startIndex;
+    let foundOpenBrace = false;
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      for (const char of line) {
+        if (char === '{') {
+          braceCount++;
+          foundOpenBrace = true;
+        }
+        if (char === '}') {
+          braceCount--;
+        }
+      }
+
+      // For type aliases, look for semicolon
+      if (!foundOpenBrace && line.includes(';')) {
+        return i;
+      }
+
+      // For interfaces/enums, look for closing brace
+      if (foundOpenBrace && braceCount === 0) {
+        return i;
+      }
+
+      i++;
+    }
+
+    return i - 1;
+  }
+
+  private findEndOfFunction(lines: string[], startIndex: number): number {
+    let braceCount = 0;
+    let i = startIndex;
+    let foundFunctionStart = false;
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      for (const char of line) {
+        if (char === '{') {
+          braceCount++;
+          foundFunctionStart = true;
+        }
+        if (char === '}') braceCount--;
+      }
+
+      // Arrow functions without braces
+      if (line.includes('=>') && !line.includes('{') && !foundFunctionStart) {
+        // Look for semicolon or end of statement
+        if (line.includes(';') || i === lines.length - 1) {
+          return i;
+        }
+      }
+
+      // Regular functions
+      if (foundFunctionStart && braceCount === 0) {
+        return i;
+      }
+
+      i++;
+    }
+
+    return i - 1;
+  }
+
+  private createTypesFile(imports: string[], types: string[]): string {
+    const typeImports = imports.filter(
+      (imp) =>
+        imp.includes('React') ||
+        imp.includes('type') ||
+        (!imp.includes('./') && !imp.includes('@/'))
+    );
+
+    return `${typeImports.join('\n')}\n\n${types.join('\n\n')}\n`;
+  }
+
+  private createUtilsFile(imports: string[], utilities: string[]): string {
+    const utilImports = imports.filter(
+      (imp) =>
+        !imp.includes('React') && !imp.includes('./') && !imp.includes('@/')
+    );
+
+    return `${utilImports.join('\n')}\n\n${utilities.join('\n\n')}\n`;
+  }
+
+  private createComponentsFile(
+    imports: string[],
+    components: string[]
+  ): string {
+    return `${imports.join('\n')}\n\n${components.join('\n\n')}\n`;
+  }
+
+  private createMainComponentFile(
+    imports: string[],
+    mainComponent: string,
+    relatedFiles: string[]
+  ): string {
+    const componentImports = relatedFiles
+      .map((file) => {
+        const fileName = path.basename(file, path.extname(file));
+        if (fileName.includes('types')) {
+          return `import type * from './${fileName}';`;
+        } else if (fileName.includes('utils')) {
+          return `import * from './${fileName}';`;
+        } else if (fileName.includes('components')) {
+          return `import * from './${fileName}';`;
+        }
+        return '';
+      })
+      .filter(Boolean);
+
+    const allImports = [...imports, ...componentImports];
+    return `${allImports.join('\n')}\n\n${mainComponent}\n`;
+  }
+
+  private createReactIndexFile(baseName: string, newFiles: string[]): string {
+    const exports = newFiles
+      .filter((file) => !file.includes('index'))
+      .map((file) => {
+        const fileName = path.basename(file, path.extname(file));
+        if (fileName.includes('main')) {
+          return `export { default } from './${fileName}';`;
+        } else {
+          return `export * from './${fileName}';`;
+        }
+      })
+      .join('\n');
+
+    return `${exports}\n`;
+  }
+
+  private suggestSplitStrategy(
+    fileStructure: FileStructure,
+    filePath: string
+  ): SplitStrategy {
+    const fileName = path.basename(filePath, path.extname(filePath));
+    const extension = path.extname(filePath);
+    const isReactComponent = extension === '.tsx' || extension === '.jsx';
+
+    const strategy: SplitStrategy = {
+      approach: '',
+      suggestions: [],
+      files: [],
+    };
+
+    // React component strategy
+    if (
+      isReactComponent &&
+      (fileStructure.components.count > 0 || fileStructure.functions.count > 0)
+    ) {
+      const fileCount =
+        2 +
+        (fileStructure.interfaces.count > 3 ? 1 : 0) +
+        (fileStructure.constants.count > 20 ? 1 : 0) +
+        (fileStructure.functions.count > 10 ? 1 : 0);
+
+      strategy.approach = `Split React component into ${fileCount} specialized files`;
+
+      if (fileStructure.interfaces.count > 3) {
+        strategy.suggestions.push(
+          `Extract ${fileStructure.interfaces.count} interfaces to types file`
+        );
+        strategy.files.push(`${fileName}-types.ts`);
+      }
+
+      if (fileStructure.constants.count > 20) {
+        strategy.suggestions.push(
+          `Extract ${fileStructure.constants.count} constants to separate file`
+        );
+        strategy.files.push(`${fileName}-constants.ts`);
+      }
+
+      if (fileStructure.functions.count > 10) {
+        strategy.suggestions.push(
+          `Extract ${fileStructure.functions.count} utility functions`
+        );
+        strategy.files.push(`${fileName}-utils.ts`);
+      }
+
+      // Always suggest extracting components for large React files
+      if (
+        fileStructure.components.count > 0 ||
+        fileStructure.largestFunction.lines > 300
+      ) {
+        strategy.suggestions.push(
+          `Break down large component into smaller sub-components`
+        );
+        strategy.files.push(`${fileName}-components${extension}`);
+      }
+
+      strategy.suggestions.push(`Keep main component in simplified main file`);
+      strategy.files.push(`${fileName}-main${extension}`);
+
+      strategy.files.push(`${fileName}-index${extension}`);
+    }
+    // Large constants file strategy
+    else if (fileStructure.constants.count > 50) {
+      strategy.approach = `Split by constant groups into ${Math.ceil(fileStructure.constants.count / 25)} files`;
+
+      const groupCount = Math.ceil(fileStructure.constants.count / 25);
+      for (let i = 1; i <= groupCount; i++) {
+        strategy.files.push(`${fileName}-constants-${i}.ts`);
+      }
+
+      strategy.suggestions.push(`Each file would have ~25 constants`);
+      strategy.files.push(`${fileName}-index.ts`);
+    }
+    // Generic splitting strategy
+    else {
+      const fileCount = Math.ceil(
+        fileStructure.totalLines / this.config.maxLines
+      );
+      strategy.approach = `Split into ${fileCount} files`;
+
+      for (let i = 1; i <= fileCount; i++) {
+        strategy.files.push(`${fileName}-part${i}${extension}`);
+      }
+
+      strategy.suggestions.push(
+        `Each file would have ~${Math.ceil(fileStructure.totalLines / fileCount)} lines`
+      );
+      strategy.files.push(`${fileName}-index${extension}`);
+    }
+
+    return strategy;
+  }
+
+  private async performIntelligentSplit(
+    originalPath: string,
+    content: string,
+    _fileStructure: FileStructure,
+    _strategy: SplitStrategy
+  ): Promise<string[]> {
+    const dir = path.dirname(originalPath);
+    const fileName = path.basename(originalPath, path.extname(originalPath));
+    const extension = path.extname(originalPath);
+    const createdFiles: string[] = [];
+
+    try {
+      // Create backup first
+      const backupPath = await this.createBackup(originalPath);
+      logger.info(`Created backup: ${path.basename(backupPath)}`);
+
+      if (extension === '.tsx' || extension === '.jsx') {
+        // Create a dedicated folder for the split files
+        const componentDir = path.join(dir, fileName);
+        await fs.ensureDir(componentDir);
+        logger.info(
+          `Created directory: ${path.relative(this.projectRoot, componentDir)}`
+        );
+
+        // Use the new intelligent parsing
+        const parsed = this.parseReactFile(content);
+        const allImports = parsed.imports;
+
+        // Create types file
+        if (parsed.types.length > 0) {
+          const typesFile = path.join(componentDir, `${fileName}-types.ts`);
+          const requiredImports = this.getRequiredImports(
+            parsed.types.join('\n'),
+            allImports
+          );
+          const typesContent = this.generateTypesFile(
+            parsed.types,
+            requiredImports
+          );
+          await fs.writeFile(typesFile, typesContent);
+          createdFiles.push(typesFile);
+          logger.info(`Created: ${path.basename(typesFile)}`);
+        }
+
+        // Create constants file
+        if (parsed.constants.length > 0) {
+          const constantsFile = path.join(
+            componentDir,
+            `${fileName}-constants.ts`
+          );
+          const requiredImports = this.getRequiredImports(
+            parsed.constants.join('\n'),
+            allImports
+          );
+          const constantsContent = this.generateConstantsFile(
+            parsed.constants,
+            requiredImports
+          );
+          await fs.writeFile(constantsFile, constantsContent);
+          createdFiles.push(constantsFile);
+          logger.info(`Created: ${path.basename(constantsFile)}`);
+        }
+
+        // Create utils file
+        if (parsed.utilities.length > 0) {
+          const utilsFile = path.join(componentDir, `${fileName}-utils.ts`);
+          const requiredImports = this.getRequiredImports(
+            parsed.utilities.join('\n'),
+            allImports
+          );
+          const utilsContent = this.generateUtilsFile(
+            parsed.utilities,
+            requiredImports
+          );
+          await fs.writeFile(utilsFile, utilsContent);
+          createdFiles.push(utilsFile);
+          logger.info(`Created: ${path.basename(utilsFile)}`);
+        }
+
+        // Create components file (sub-components and helpers)
+        if (parsed.subComponents.length > 0) {
+          const componentsFile = path.join(
+            componentDir,
+            `${fileName}-components${extension}`
+          );
+          const requiredImports = this.getRequiredImports(
+            parsed.subComponents.join('\n'),
+            allImports
+          );
+          const componentsContent = this.generateComponentsFile(
+            parsed.subComponents,
+            requiredImports,
+            fileName
+          );
+          await fs.writeFile(componentsFile, componentsContent);
+          createdFiles.push(componentsFile);
+          logger.info(`Created: ${path.basename(componentsFile)}`);
+        }
+
+        // Create main component file (simplified)
+        const mainFile = path.join(
+          componentDir,
+          `${fileName}-main${extension}`
+        );
+        const requiredImports = this.getRequiredImports(
+          parsed.mainComponent,
+          allImports
+        );
+        const mainContent = this.generateMainComponentFile(
+          parsed.mainComponent,
+          requiredImports,
+          fileName,
+          createdFiles
+        );
+        await fs.writeFile(mainFile, mainContent);
+        createdFiles.push(mainFile);
+        logger.info(`Created: ${path.basename(mainFile)}`);
+
+        // Create index file that re-exports everything
+        const indexFile = path.join(componentDir, `index${extension}`);
+        const indexContent = this.generateIndexFile(fileName, createdFiles);
+        await fs.writeFile(indexFile, indexContent);
+        createdFiles.push(indexFile);
+        logger.info(`Created: ${path.basename(indexFile)}`);
+
+        // Update the original file to import from the new structure
+        const updatedOriginalContent = this.createUpdatedOriginalFile(
+          fileName,
+          componentDir
+        );
+        await fs.writeFile(originalPath, updatedOriginalContent);
+        logger.info(`Updated original file to import from ./${fileName}/`);
+      } else {
+        // Generic file splitting with folder structure
+        const fileDir = path.join(dir, fileName);
+        await fs.ensureDir(fileDir);
+        logger.info(
+          `Created directory: ${path.relative(this.projectRoot, fileDir)}`
+        );
+
+        const chunks = this.splitContentIntoChunks(
+          content,
+          this.config.maxLines
+        );
+
+        for (let i = 0; i < chunks.length; i++) {
+          const chunkFile = path.join(
+            fileDir,
+            `${fileName}-part${i + 1}${extension}`
+          );
+          await fs.writeFile(chunkFile, chunks[i]);
+          createdFiles.push(chunkFile);
+          logger.info(`Created: ${path.basename(chunkFile)}`);
+        }
+
+        // Create index file
+        const indexFile = path.join(fileDir, `index${extension}`);
+        const indexContent = this.createGenericIndexFile(
+          fileName,
+          createdFiles
+        );
+        await fs.writeFile(indexFile, indexContent);
+        createdFiles.push(indexFile);
+        logger.info(`Created: ${path.basename(indexFile)}`);
+
+        // Update original file to import from the new structure
+        const updatedOriginalContent = this.createUpdatedOriginalFile(
+          fileName,
+          fileDir
+        );
+        await fs.writeFile(originalPath, updatedOriginalContent);
+        logger.info(`Updated original file to import from ./${fileName}/`);
+      }
+
+      return createdFiles;
+    } catch (error) {
+      // Clean up any created files on error
+      for (const file of createdFiles) {
+        if (await fs.pathExists(file)) {
+          await fs.remove(file);
+        }
+      }
+      throw error;
+    }
+  }
+
+  private analyzeFileStructure(
+    content: string,
+    lines: string[]
+  ): FileStructure {
+    const structure: FileStructure = {
+      totalLines: lines.length,
+      imports: { count: 0, lines: 0 },
+      interfaces: { count: 0, lines: 0 },
+      types: { count: 0, lines: 0 },
+      constants: { count: 0, lines: 0 },
+      functions: { count: 0, lines: 0 },
+      components: { count: 0, lines: 0 },
+      classes: { count: 0, lines: 0 },
+      comments: { lines: 0 },
+      emptyLines: 0,
+      largestFunction: { name: '', lines: 0 },
+      largestComponent: { name: '', lines: 0 },
+    };
+
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i].trim();
+
+      // Count empty lines
+      if (!line) {
+        structure.emptyLines++;
+        i++;
+        continue;
+      }
+
+      // Count comment lines
+      if (
+        line.startsWith('//') ||
+        line.startsWith('/*') ||
+        line.startsWith('*')
+      ) {
+        structure.comments.lines++;
+        i++;
+        continue;
+      }
+
+      // Count imports
+      if (line.startsWith('import')) {
+        structure.imports.count++;
+        let importLines = 1;
+        let j = i + 1;
+
+        // Handle multi-line imports
+        while (j < lines.length && !lines[i + importLines - 1].includes(';')) {
+          importLines++;
+          j++;
+        }
+
+        structure.imports.lines += importLines;
+        i += importLines;
+        continue;
+      }
+
+      // Count interfaces
+      if (line.includes('interface ')) {
+        structure.interfaces.count++;
+        const endIndex = this.findEndOfTypeDefinition(lines, i);
+        const interfaceLines = endIndex - i + 1;
+        structure.interfaces.lines += interfaceLines;
+        i = endIndex + 1;
+        continue;
+      }
+
+      // Count type aliases
+      if (line.includes('type ') && line.includes('=')) {
+        structure.types.count++;
+        const endIndex = this.findEndOfTypeDefinition(lines, i);
+        const typeLines = endIndex - i + 1;
+        structure.types.lines += typeLines;
+        i = endIndex + 1;
+        continue;
+      }
+
+      // Count constants
+      if (
+        (line.includes('const ') || line.includes('export const ')) &&
+        !line.includes('function')
+      ) {
+        structure.constants.count++;
+        let constantLines = 1;
+        let j = i + 1;
+
+        // Handle multi-line constants
+        while (
+          j < lines.length &&
+          !lines[j - 1].includes(';') &&
+          !lines[j - 1].includes('};')
+        ) {
+          constantLines++;
+          j++;
+        }
+
+        structure.constants.lines += constantLines;
+        i += constantLines;
+        continue;
+      }
+
+      // Count React components first (functions that likely return JSX)
+      if (
+        (line.includes('function ') || line.includes('const ')) &&
+        (line.includes('React.') ||
+          line.includes(': React.') ||
+          line.includes('<T') ||
+          line.includes('export function') ||
+          content.substring(content.indexOf(line)).includes('return (') ||
+          content.substring(content.indexOf(line)).includes('jsx') ||
+          content.substring(content.indexOf(line)).includes('JSX') ||
+          (line.includes('export') &&
+            content.substring(content.indexOf(line)).includes('<')))
+      ) {
+        structure.components.count++;
+        const endIndex = this.findEndOfFunction(lines, i);
+        const componentLines = endIndex - i + 1;
+        structure.components.lines += componentLines;
+
+        // Check if this is the largest component
+        const componentName =
+          line.match(/(?:function|const)\s+(\w+)/)?.[1] || 'anonymous';
+        if (componentLines > structure.largestComponent.lines) {
+          structure.largestComponent = {
+            name: componentName,
+            lines: componentLines,
+          };
+        }
+
+        i = endIndex + 1;
+        continue;
+      }
+
+      // Count other functions (non-React functions)
+      if (
+        line.includes('function ') ||
+        (line.includes('const ') && line.includes(' => '))
+      ) {
+        structure.functions.count++;
+        const endIndex = this.findEndOfFunction(lines, i);
+        const functionLines = endIndex - i + 1;
+        structure.functions.lines += functionLines;
+
+        // Check if this is the largest function
+        const functionName =
+          line.match(/(?:function|const)\s+(\w+)/)?.[1] || 'anonymous';
+        if (functionLines > structure.largestFunction.lines) {
+          structure.largestFunction = {
+            name: functionName,
+            lines: functionLines,
+          };
+        }
+
+        i = endIndex + 1;
+        continue;
+      }
+
+      // Count classes
+      if (line.includes('class ')) {
+        structure.classes.count++;
+        const endIndex = this.findEndOfFunction(lines, i); // Classes use similar brace counting
+        const classLines = endIndex - i + 1;
+        structure.classes.lines += classLines;
+        i = endIndex + 1;
+        continue;
+      }
+
+      i++;
+    }
+
+    return structure;
+  }
+
+  private createUpdatedOriginalFile(
+    fileName: string,
+    componentDir: string
+  ): string {
+    const relativePath = `./${path.basename(componentDir)}`;
+    return `// This file has been refactored and split into multiple files
+// The original functionality is now exported from the ${fileName} directory
+
+export * from '${relativePath}';
+export { default } from '${relativePath}';
+`;
+  }
+
+  private createConstantsFile(content: string, imports: string[]): string {
+    const lines = content.split('\n');
+    const constants: string[] = [];
+
+    // Extract constant declarations
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i].trim();
+
+      if (
+        line.startsWith('const ') &&
+        line.includes('=') &&
+        !line.includes('React.FC') &&
+        !line.includes(': FC') &&
+        !line.includes('useState') &&
+        !line.includes('useEffect')
+      ) {
+        const start = i;
+        const end = this.findEndOfConstant(lines, i);
+        constants.push(lines.slice(start, end + 1).join('\n'));
+        i = end + 1;
+      } else {
+        i++;
+      }
+    }
+
+    return `${imports.join('\n')}
+
+// Constants
+
+${constants.join('\n\n')}
+`;
+  }
+
+  private createComponentIndexFile(
+    fileName: string,
+    createdFiles: string[],
+    componentDir: string
+  ): string {
+    const exports: string[] = [];
+    const mainComponentName = this.extractMainComponentName(fileName);
+
+    for (const file of createdFiles) {
+      const relativePath = path.relative(componentDir, file);
+      const baseName = path.basename(relativePath, path.extname(relativePath));
+
+      if (baseName.includes('index')) {
+        continue; // Skip the index file itself
+      } else if (
+        baseName.includes('-types') ||
+        baseName.includes('-constants') ||
+        baseName.includes('-utils') ||
+        baseName.includes('-components')
+      ) {
+        exports.push(`export * from './${baseName}';`);
+      } else if (baseName.includes('-main')) {
+        exports.push(`import ${mainComponentName} from './${baseName}';`);
+        exports.push(`export { ${mainComponentName} };`);
+        exports.push(`export default ${mainComponentName};`);
+      }
+    }
+
+    return `// Auto-generated index file for ${fileName}
+
+${exports.join('\n')}
+`;
+  }
+
+  private extractMainComponentName(fileName: string): string {
+    // Convert kebab-case to PascalCase
+    return fileName
+      .split('-')
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join('');
+  }
+
+  private extractImportsForUtils(lines: string[]): string[] {
+    const allImports = this.extractImportsSection(lines.join('\n'));
+    // Filter imports that are likely needed for utilities
+    return allImports.filter(
+      (imp) =>
+        !imp.includes('React') &&
+        !imp.includes('jsx') &&
+        !imp.includes('lucide-react') &&
+        !imp.includes('./') &&
+        !imp.includes('@/')
+    );
+  }
+
+  private findEndOfConstant(lines: string[], start: number): number {
+    let i = start;
+    let braceCount = 0;
+    let foundStart = false;
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      for (const char of line) {
+        if (char === '{' || char === '[') {
+          braceCount++;
+          foundStart = true;
+        }
+        if (char === '}' || char === ']') {
+          braceCount--;
+        }
+      }
+
+      // Simple constants end with semicolon
+      if (!foundStart && line.includes(';')) {
+        return i;
+      }
+
+      // Complex constants end when braces balance
+      if (foundStart && braceCount === 0 && line.includes(';')) {
+        return i;
+      }
+
+      i++;
+    }
+
+    return i - 1;
+  }
+
+  // New intelligent React file parsing methods
+  private parseReactFile(content: string): {
+    imports: string[];
+    types: string[];
+    constants: string[];
+    utilities: string[];
+    subComponents: string[];
+    mainComponent: string;
+  } {
+    const lines = content.split('\n');
+    const result = {
+      imports: [] as string[],
+      types: [] as string[],
+      constants: [] as string[],
+      utilities: [] as string[],
+      subComponents: [] as string[],
+      mainComponent: '',
+    };
+
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i].trim();
+
+      // Extract imports
+      if (line.startsWith('import')) {
+        const importBlock = this.extractBlock(lines, i, 'import');
+        result.imports.push(importBlock.content);
+        i = importBlock.endIndex + 1;
+        continue;
+      }
+
+      // Extract types and interfaces
+      if (line.includes('interface ') || line.includes('type ')) {
+        const typeBlock = this.extractBlock(lines, i, 'type');
+        result.types.push(typeBlock.content);
+        i = typeBlock.endIndex + 1;
+        continue;
+      }
+
+      // Extract constants
+      if (
+        line.startsWith('const ') &&
+        !this.isFunction(line) &&
+        !this.isComponent(line)
+      ) {
+        const constantBlock = this.extractBlock(lines, i, 'constant');
+        result.constants.push(constantBlock.content);
+        i = constantBlock.endIndex + 1;
+        continue;
+      }
+
+      // Extract functions and components
+      if (this.isFunction(line) || this.isComponent(line)) {
+        const functionBlock = this.extractBlock(lines, i, 'function');
+
+        if (this.isComponent(line)) {
+          if (this.isMainComponent(lines, i)) {
+            result.mainComponent = functionBlock.content;
+          } else {
+            result.subComponents.push(functionBlock.content);
+          }
+        } else {
+          result.utilities.push(functionBlock.content);
+        }
+
+        i = functionBlock.endIndex + 1;
+        continue;
+      }
+
+      i++;
+    }
+
+    return result;
+  }
+
+  private extractAllImports(lines: string[]): string[] {
+    const imports: string[] = [];
+    let i = 0;
+
+    while (i < lines.length) {
+      const line = lines[i].trim();
+
+      if (line.startsWith('import')) {
+        const importBlock = this.extractBlock(lines, i, 'import');
+        imports.push(importBlock.content);
+        i = importBlock.endIndex + 1;
+      } else {
+        i++;
+      }
+    }
+
+    return imports;
+  }
+
+  private extractBlock(
+    lines: string[],
+    startIndex: number,
+    blockType: string
+  ): { content: string; endIndex: number } {
+    let endIndex = startIndex;
+
+    switch (blockType) {
+      case 'import':
+        endIndex = this.findEndOfImport(lines, startIndex);
+        break;
+      case 'type':
+        endIndex = this.findEndOfTypeDefinition(lines, startIndex);
+        break;
+      case 'constant':
+        endIndex = this.findEndOfConstant(lines, startIndex);
+        break;
+      case 'function':
+        endIndex = this.findEndOfFunction(lines, startIndex);
+        break;
+      default:
+        endIndex = startIndex;
+    }
+
+    const content = lines.slice(startIndex, endIndex + 1).join('\n');
+    return { content, endIndex };
+  }
+
+  private findEndOfImport(lines: string[], startIndex: number): number {
+    let i = startIndex;
+    let braceCount = 0;
+
+    while (i < lines.length) {
+      const line = lines[i];
+
+      braceCount +=
+        (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+
+      if (line.includes(';') && braceCount <= 0) {
+        return i;
+      }
+
+      i++;
+    }
+
+    return i - 1;
+  }
+
+  private isFunction(line: string): boolean {
+    return (
+      (line.includes('function ') ||
+        (line.includes('const ') &&
+          line.includes(' = ') &&
+          (line.includes('=>') || line.includes('function')))) &&
+      !line.includes('React.FC') &&
+      !line.includes(': FC')
+    );
+  }
+
+  private isComponent(line: string): boolean {
+    return (
+      (line.includes('function ') ||
+        (line.includes('const ') && line.includes(' = '))) &&
+      (line.includes('React.FC') ||
+        line.includes(': FC') ||
+        line.includes(': React.') ||
+        line.includes('JSX.Element') ||
+        line.includes('ReactElement') ||
+        line.includes('export function') ||
+        // Check if the function name starts with capital letter (React component convention)
+        /(?:function|const)\s+([A-Z][a-zA-Z0-9]*)/.test(line) ||
+        // Check for generic type parameters which are common in data components
+        /<[A-Z][^>]*>/.test(line))
+    );
+  }
+
+  private isMainComponent(lines: string[], index: number): boolean {
+    const line = lines[index];
+    const componentName = line.match(/(?:function|const)\s+(\w+)/)?.[1];
+
+    if (!componentName) return false;
+
+    // Check if this component is exported as default
+    for (let i = index; i < lines.length; i++) {
+      if (lines[i].includes(`export default ${componentName}`)) {
+        return true;
+      }
+    }
+
+    // Check if this is an export function (like export function DataTable)
+    if (line.includes('export function')) {
+      return true;
+    }
+
+    // If no explicit default export, check if it's a major component based on name patterns
+    if (
+      componentName &&
+      /^[A-Z].*(?:Table|Component|Page|View|Layout|App)$/.test(componentName)
+    ) {
+      return true;
+    }
+
+    return false;
+  }
+
+  private getRequiredImports(content: string, allImports: string[]): string[] {
+    const requiredImports: string[] = [];
+
+    for (const importStatement of allImports) {
+      // Parse the import statement to extract imported names
+      const importMatch = importStatement.match(
+        /import\s+(?:type\s+)?(?:\{([^}]+)\}|\*\s+as\s+(\w+)|(\w+))\s+from\s+['"]([^'"]+)['"]/
+      );
+
+      if (!importMatch) continue;
+
+      const [, namedImports, namespaceImport, defaultImport, _modulePath] =
+        importMatch;
+
+      // Check if any of the imported items are used in the content
+      let isUsed = false;
+
+      if (namedImports) {
+        // Check named imports
+        const imports = namedImports.split(',').map((imp) => imp.trim());
+        for (const imp of imports) {
+          const cleanImport = imp.replace(/\s+as\s+\w+/, '').trim();
+          if (content.includes(cleanImport)) {
+            isUsed = true;
+            break;
+          }
+        }
+      } else if (namespaceImport) {
+        // Check namespace imports (import * as name)
+        if (content.includes(namespaceImport)) {
+          isUsed = true;
+        }
+      } else if (defaultImport) {
+        // Check default imports
+        if (content.includes(defaultImport)) {
+          isUsed = true;
+        }
+      }
+
+      if (isUsed) {
+        requiredImports.push(importStatement);
+      }
+    }
+
+    return requiredImports;
+  }
+
+  // Improved code generation methods
+  private generateTypesFile(types: string[], imports: string[]): string {
+    return `${imports.join('\n')}
+
+// Type definitions
+
+${types.join('\n\n')}
+`;
+  }
+
+  private generateConstantsFile(
+    constants: string[],
+    imports: string[]
+  ): string {
+    return `${imports.join('\n')}
+
+// Constants
+
+${constants.join('\n\n')}
+`;
+  }
+
+  private generateUtilsFile(utilities: string[], imports: string[]): string {
+    return `${imports.join('\n')}
+
+// Utility functions
+
+${utilities.join('\n\n')}
+`;
+  }
+
+  private generateComponentsFile(
+    subComponents: string[],
+    imports: string[],
+    fileName: string
+  ): string {
+    return `${imports.join('\n')}
+
+// Sub-components for ${fileName}
+
+${subComponents.join('\n\n')}
+`;
+  }
+
+  private generateMainComponentFile(
+    mainComponent: string,
+    imports: string[],
+    fileName: string,
+    createdFiles: string[]
+  ): string {
+    // Generate relative imports for the split files
+    const relativeImports: string[] = [];
+
+    for (const file of createdFiles) {
+      const baseName = path.basename(file, path.extname(file));
+      if (baseName.includes('-types')) {
+        relativeImports.push(`import type * from './${baseName}';`);
+      } else if (baseName.includes('-constants')) {
+        relativeImports.push(`import * from './${baseName}';`);
+      } else if (baseName.includes('-utils')) {
+        relativeImports.push(`import * from './${baseName}';`);
+      } else if (baseName.includes('-components')) {
+        relativeImports.push(`import * from './${baseName}';`);
+      }
+    }
+
+    return `${imports.join('\n')}
+
+${relativeImports.join('\n')}
+
+// Main component
+
+${mainComponent}
+`;
+  }
+
+  private generateIndexFile(fileName: string, createdFiles: string[]): string {
+    const exports: string[] = [];
+    let mainComponentName = '';
+
+    for (const file of createdFiles) {
+      const baseName = path.basename(file, path.extname(file));
+
+      if (baseName.includes('index')) {
+        continue; // Skip the index file itself
+      } else if (
+        baseName.includes('-types') ||
+        baseName.includes('-constants') ||
+        baseName.includes('-utils') ||
+        baseName.includes('-components')
+      ) {
+        exports.push(`export * from './${baseName}';`);
+      } else if (baseName.includes('-main')) {
+        mainComponentName = this.toPascalCase(fileName);
+        exports.push(`import ${mainComponentName} from './${baseName}';`);
+      }
+    }
+
+    if (mainComponentName) {
+      exports.push(`export { ${mainComponentName} };`);
+      exports.push(`export default ${mainComponentName};`);
+    }
+
+    return `// Auto-generated index file for ${fileName}
+
+${exports.join('\n')}
+`;
+  }
+
+  private toCamelCase(str: string): string {
+    return str.replace(/-([a-z])/g, (g) => g[1].toUpperCase());
+  }
+
+  private toPascalCase(str: string): string {
+    return str.replace(/(^|-)([a-z])/g, (g) => g.slice(-1).toUpperCase());
   }
 }

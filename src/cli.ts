@@ -65,11 +65,12 @@ program
 program
   .command('run')
   .description('Execute refactoring')
+  .argument('[file]', 'Specific file to refactor (optional)')
   .option('-c, --config <path>', 'Path to config file')
   .option('--dry', 'Dry run - show what would be changed')
   .option('--no-backup', 'Skip creating backups')
   .option('-v, --verbose', 'Verbose output')
-  .action(async (options) => {
+  .action(async (file, options) => {
     try {
       const refactor = new AutoRefactor(options.config);
       if (options.verbose) logger.setVerbose(true);
@@ -78,6 +79,7 @@ program
         dryRun: options.dry,
         createBackups: options.backup !== false,
         verbose: options.verbose,
+        specificFile: file,
       });
 
       if (options.dry) {
@@ -149,6 +151,42 @@ program
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`Compression failed: ${message}`);
+      process.exit(1);
+    }
+  });
+
+program
+  .command('split')
+  .description('Intelligently split a file based on its structure')
+  .argument('<file>', 'File to split')
+  .option('-c, --config <path>', 'Path to config file')
+  .option('--dry', 'Dry run - show what would be split')
+  .option('-v, --verbose', 'Verbose output')
+  .action(async (file, options) => {
+    try {
+      const refactor = new AutoRefactor(options.config);
+      if (options.verbose) logger.setVerbose(true);
+
+      const result = await refactor.splitFile(file, {
+        dryRun: options.dry,
+      });
+
+      if (options.dry) {
+        logger.section('Split Analysis Results:');
+        if (result.analysis) {
+          result.analysis.forEach((line: string) => logger.info(line));
+        }
+      } else {
+        logger.success(
+          `Split complete. Created ${result.newFiles.length} files.`
+        );
+        result.newFiles.forEach((file: string) =>
+          logger.listItem(path.basename(file))
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.error(`Split failed: ${message}`);
       process.exit(1);
     }
   });
